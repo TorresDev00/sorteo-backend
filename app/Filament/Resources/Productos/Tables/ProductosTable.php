@@ -38,7 +38,7 @@ class ProductosTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+            
             ])
             ->recordActions([
                 EditAction::make(),
