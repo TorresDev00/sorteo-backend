@@ -18,6 +18,9 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use Illuminate\Support\HtmlString;
+use App\Filament\Pages\Home;
+
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -28,13 +31,18 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->brandLogo(asset('images/logo_largo.webp'))
+            ->brandLogoHeight('2rem')
+            ->favicon(asset('images/logo.ico'))
+            ->font("Poppins")
             ->colors([
-                'primary' => Color::Amber,
+                'primary' => '#00247d', 
+                'gray'    => Color::Slate,
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
             ->pages([
-                Dashboard::class,
+                Home::class,
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->widgets([

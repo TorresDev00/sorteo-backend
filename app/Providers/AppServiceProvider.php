@@ -3,7 +3,11 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\Schema; // 1. IMPORTANTE: Añade esta línea
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Failed;
+use App\Listeners\LoginLogListener;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,6 +24,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Schema::defaultStringLength(191); // 2. IMPORTANTE: Añade esta línea
+        Schema::defaultStringLength(191); 
+        Event::listen(Login::class, [LoginLogListener::class, 'handle']);
+        Event::listen(Failed::class, [LoginLogListener::class, 'handle']);
     }
 }
