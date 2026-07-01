@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Failed;
 use App\Listeners\LoginLogListener;
+use App\Models\Registro;
+use App\Observers\RegistroObserver;
+use App\Models\LiberacionPremio;
+use App\Observers\LiberacionPremioObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,8 +28,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Schema::defaultStringLength(191); 
+        Schema::defaultStringLength(191);
         Event::listen(Login::class, [LoginLogListener::class, 'handle']);
         Event::listen(Failed::class, [LoginLogListener::class, 'handle']);
+        Registro::observe(RegistroObserver::class);
+        LiberacionPremio::observe(LiberacionPremioObserver::class);
     }
 }

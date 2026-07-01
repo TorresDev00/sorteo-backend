@@ -57,18 +57,15 @@ class RegistroResource extends Resource
                     ->label('Estatus de Validación')
                     ->options([
                         'pendiente' => 'Pendiente por Revisar',
+                        'preseleccionado' => 'Preseleccionado — Validar Factura', 
                         'verificado' => 'Verificado / Válido',
                         'rechazado' => 'Rechazado / Fraude',
                     ])
                     ->required(),
-
-                Toggle::make('ganador')
-                    ->label('Marcar como Ganador de la Semana')
-                    ->reactive(),
-
                 Select::make('premio_id')
                     ->label('Asignar Premio Obtenido')
                     ->relationship('premio', 'nombre')
+                    ->disabled()
                     ->visible(fn (callable $get) => $get('ganador') === true),
             ]);
     }
@@ -98,9 +95,10 @@ class RegistroResource extends Resource
                     ->label('Estatus')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
-                        'pendiente' => 'gray',
-                        'verificado' => 'success',
-                        'rechazado' => 'danger',
+                        'pendiente'       => 'gray',
+                        'preseleccionado' => 'warning',   // ← NUEVO: amarillo/naranja
+                        'verificado'      => 'success',
+                        'rechazado'       => 'danger',
                     }),
 
                 TextColumn::make('ganador')
@@ -113,6 +111,7 @@ class RegistroResource extends Resource
             ->filters([
                 SelectFilter::make('estado')->options([
                     'pendiente' => 'Pendiente',
+                    'preseleccionado' => 'Preseleccionado',
                     'verificado' => 'Verificado',
                     'rechazado' => 'Rechazado',
                 ]),
