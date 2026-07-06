@@ -26,6 +26,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Form;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Actions\ActionGroup;
 
 class LiberacionSemanalResource extends Resource
 {
@@ -50,7 +51,27 @@ class LiberacionSemanalResource extends Resource
                 TextInput::make('semana')
                     ->label('Número de Semana (Ej: 1)')
                     ->numeric()
-                    ->required(),
+                    ->required()
+                    ->rules([
+                        function (callable $get) {
+                            return function (string $attribute, $value, \Closure $fail) use ($get) {
+                                $sorteoId = $get('sorteo_id');
+                                if (! $sorteoId) {
+                                    $fail('Seleccioná un sorteo antes de asignar la semana.');
+                                    return;
+                                }
+
+                                $existe = \App\Models\LiberacionSemanal::where('sorteo_id', $sorteoId)
+                                    ->where('semana', $value)
+                                    ->exists();
+
+                                if ($existe) {
+                                    $fail("La semana {$value} ya fue liberada para este sorteo. Elegí otro número de semana.");
+                                }
+                            };
+                        },
+                    ])
+                    ->helperText('No podés repetir el mismo número de semana para el mismo sorteo.'),
                 Textarea::make('notas')
                     ->label('Notas de esta Entrega')
                     ->columnSpanFull(),
@@ -61,21 +82,64 @@ class LiberacionSemanalResource extends Resource
                     ->label('Distribución de Premios del Lote')
                     ->schema([
                         Select::make('premio_id')
-                            ->label('Seleccionar Premio del Inventario')
-                            ->relationship('premio', 'nombre')
+                            ->label('Premio')
+                            ->options(function () {
+                                return \App\Models\Premio::where('cantidad_disponible', '>', 0)
+                                    ->orderBy('nombre')
+                                    ->pluck('nombre', 'id')
+                                    ->map(fn($nombre, $id) => "{$nombre} (Stock: " . \App\Models\Premio::find($id)->cantidad_disponible . ")");
+                            })
                             ->required()
-                            ->columnSpan(2), // Le damos más espacio al nombre del premio
+                            ->reactive()
+                            ->searchable(),
 
                         TextInput::make('cantidad')
-                        ->label('Cantidad a liberar')
-                        ->numeric()
-                        ->required()
-                        ->minValue(1)
-                        ->maxValue(fn (callable $get) => static::stockDisponible($get) ?: 1)
-                        ->hint(fn (callable $get) => $get('premio_id')
-                            ? 'Stock : ' . static::stockDisponible($get)
-                            : 'Selecciona un premio primero')
-                        ->helperText('No puedes asignar más de lo que hay en inventario.'),
+                            ->label('Cantidad a liberar')
+                            ->numeric()
+                            ->minValue(1)
+                            ->required()
+                            ->rules([
+                                function (callable $get) {
+                                    return function (string $attribute, $value, \Closure $fail) use ($get) {
+                                        $premioId = $get('premio_id');
+                                        if (! $premioId) {
+                                            $fail('Seleccioná un premio primero.');
+                                            return;
+                                        }
+
+                                        $premio = \App\Models\Premio::find($premioId);
+                                        if (! $premio) {
+                                            $fail('El premio seleccionado no existe.');
+                                            return;
+                                        }
+
+                                        $maximo = $premio->cantidad_disponible;
+
+                                        if ($value > $maximo) {
+                                            $fail("No hay suficiente stock. Stock disponible: {$maximo}. Intentaste asignar: {$value}.");
+                                        }
+                                    };
+                                },
+                            ])
+                            ->helperText(function (callable $get): string {
+                                $premioId = $get('premio_id');
+                                if (! $premioId) return 'Seleccioná un premio para ver el stock disponible.';
+
+                                $premio = \App\Models\Premio::find($premioId);
+                                if (! $premio) return 'Premio no encontrado.';
+
+                                return "Stock total: {$premio->cantidad_total} | Disponible: {$premio->cantidad_disponible}";
+                            })
+                            ->hint(function (callable $get): string {
+                                $premioId = $get('premio_id');
+                                if (! $premioId) return '';
+
+                                $premio = \App\Models\Premio::find($premioId);
+                                if (! $premio) return '';
+
+                                $maximo = $premio->cantidad_disponible;
+                                return "Máximo: {$maximo}";
+                            }),
 
                         // 🌟 Nuevo Campo: Muestra el conteo en tiempo real de los ganadores de la Landing
                         TextInput::make('cantidad_entregada')
@@ -99,8 +163,8 @@ class LiberacionSemanalResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            // 🛠️ Paso A: Cargamos la suma de las relaciones antes de pintar las columnas
-            ->modifyQueryUsing(fn($query) => $query->withSum('liberacionPremios as total_liberados', 'cantidad')
+            ->modifyQueryUsing(fn($query) => $query
+                ->withSum('liberacionPremios as total_liberados', 'cantidad')
                 ->withSum('liberacionPremios as total_entregados', 'cantidad_entregada'))
             ->columns([
                 TextColumn::make('sorteo.nombre')
@@ -112,13 +176,11 @@ class LiberacionSemanalResource extends Resource
                     ->color('warning')
                     ->sortable(),
 
-                // 🌟 Nueva Columna: Total de Premios Disponibles puestos en juego esta semana
                 TextColumn::make('total_liberados')
                     ->label('Premios en Lote')
                     ->numeric()
                     ->alignCenter(),
 
-                // 🌟 Nueva Columna: Cuántos de esos premios ya se llevó la gente
                 TextColumn::make('total_entregados')
                     ->label('Entregados')
                     ->numeric()
@@ -136,50 +198,128 @@ class LiberacionSemanalResource extends Resource
             ])
             ->defaultSort('semana', 'desc')
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
-                Action::make('trasladarSobrantes')
-                    ->label('Cerrar semana y trasladar sobrantes')
-                    ->icon('heroicon-o-arrow-right-circle')
-                    ->color('warning')
-                    ->requiresConfirmation()
-                    ->modalHeading('Trasladar premios sin ganar a la siguiente semana')
-                    ->modalDescription('Esto moverá todo el saldo sin ganar de este lote hacia el lote de la semana siguiente. Si el lote de la semana siguiente no existe todavía, se creará automáticamente. Esta acción no se puede deshacer.')
-                    ->action(function (LiberacionSemanal $record) {
-                        $siguienteSemana = $record->semana + 1;
+                ActionGroup::make([
+                    ViewAction::make()
+                        ->label('Ver detalle'),
 
-                        $siguienteLote = LiberacionSemanal::firstOrCreate(
-                            ['sorteo_id' => $record->sorteo_id, 'semana' => $siguienteSemana],
-                            [
-                                'fecha_liberacion' => now(),
-                                'notas'            => "Semana {$siguienteSemana} — incluye sobrantes trasladados de la semana {$record->semana}",
-                            ]
-                        );
+                    EditAction::make()
+                        ->label('Editar lote'),
 
-                        $resumen = $record->trasladarSobrantesA($siguienteLote);
+                    Action::make('trasladarSobrantes')
+                        ->label('Cerrar semana y trasladar sobrantes')
+                        ->icon('heroicon-o-arrow-right-circle')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-exclamation-triangle')
+                        ->modalHeading('Trasladar premios sin ganar a la siguiente semana')
+                        ->modalDescription('Esto moverá todo el saldo sin ganar de este lote hacia el lote de la semana siguiente. Si el lote de la semana siguiente no existe todavía, se creará automáticamente. Esta acción no se puede deshacer.')
+                        ->modalSubmitActionLabel('Sí, trasladar')
+                        ->action(function (LiberacionSemanal $record) {
+                            $siguienteSemana = $record->semana + 1;
 
-                        if (empty($resumen)) {
+                            $siguienteLote = LiberacionSemanal::firstOrCreate(
+                                ['sorteo_id' => $record->sorteo_id, 'semana' => $siguienteSemana],
+                                [
+                                    'fecha_liberacion' => now(),
+                                    'notas'            => "Semana {$siguienteSemana} — incluye sobrantes trasladados de la semana {$record->semana}",
+                                ]
+                            );
+
+                            $resumen = $record->trasladarSobrantesA($siguienteLote);
+
+                            if (empty($resumen)) {
+                                Notification::make()
+                                    ->title('Nada que trasladar')
+                                    ->body('Todos los premios de esta semana ya se agotaron o están reservados.')
+                                    ->warning()
+                                    ->send();
+                                return;
+                            }
+
+                            $resumenTexto = collect($resumen)->map(fn($r) => "{$r['premio']}: +{$r['trasladado']}")->join(', ');
+
+                            activity('liberaciones_semanales')
+                                ->causedBy(auth()->user())
+                                ->performedOn($record)
+                                ->log("Admin " . auth()->user()->name . " trasladó sobrantes de la semana {$record->semana} a la semana {$siguienteSemana}: {$resumenTexto}");
+
                             Notification::make()
-                                ->title('Nada que trasladar')
-                                ->body('Todos los premios de esta semana ya se agotaron o están reservados.')
-                                ->warning()
+                                ->title('Sobrantes trasladados a la semana ' . $siguienteSemana)
+                                ->body(collect($resumen)->map(fn($r) => "{$r['premio']}: +{$r['trasladado']}")->join(' | '))
+                                ->success()
                                 ->send();
-                            return;
-                        }
+                        }),
 
-                        Notification::make()
-                            ->title('Sobrantes trasladados a la semana ' . $siguienteSemana)
-                            ->body(collect($resumen)->map(fn($r) => "{$r['premio']}: +{$r['trasladado']}")->join(' | '))
-                            ->success()
-                            ->send();
-                    }),
+                    Action::make('eliminarLote')
+                        ->label('Eliminar lote')
+                        ->icon('heroicon-o-trash')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-exclamation-triangle')
+                        ->modalHeading('¿Eliminar este lote semanal?')
+                        ->modalDescription(fn(LiberacionSemanal $record) => self::descripcionEliminar($record))
+                        ->modalSubmitActionLabel('Sí, eliminar')
+                        ->action(function (LiberacionSemanal $record) {
+                            $pendientes = \App\Models\Registro::whereIn(
+                                'liberacion_premio_id',
+                                $record->liberacionPremios()->pluck('id')
+                            )->where('estado', 'preseleccionado')->count();
+
+                            if ($pendientes > 0) {
+                                Notification::make()
+                                    ->title('No se puede eliminar')
+                                    ->body("Hay {$pendientes} registro(s) preseleccionados esperando validación en este lote. Resuélvelos primero (verifícalos o recházalos) antes de eliminar el lote.")
+                                    ->danger()
+                                    ->send();
+                                return;
+                            }
+
+                            $semana = $record->semana;
+                            $sorteoNombre = $record->sorteo?->nombre ?? 'sorteo desconocido';
+                            $adminNombre = auth()->user()->name;
+
+                            $record->delete();
+
+                            activity('liberaciones_semanales')
+                                ->causedBy(auth()->user())
+                                ->withProperties(['semana' => $semana, 'sorteo' => $sorteoNombre])
+                                ->log("Admin {$adminNombre} eliminó el lote de la semana {$semana} ({$sorteoNombre})");
+
+                            Notification::make()
+                                ->title('Lote eliminado')
+                                ->success()
+                                ->send();
+                        }),
+                ])
+                    ->label('Acciones')
+                    ->icon('heroicon-m-ellipsis-vertical')
+                    ->color('gray')
+                    ->button(),
+            ])
+            ->filters([
+                //
             ]);
+    }
+
+    private static function descripcionEliminar(LiberacionSemanal $record): string
+    {
+        $totalRegistros = \App\Models\Registro::whereIn(
+            'liberacion_premio_id',
+            $record->liberacionPremios()->pluck('id')
+        )->count();
+
+        if ($totalRegistros === 0) {
+            return 'Esta acción eliminará el lote y todos sus premios asociados. No se puede deshacer.';
+        }
+
+        return "Este lote tiene {$totalRegistros} registro(s) de participantes vinculados. Al eliminarlo, esos registros conservarán su historial pero perderán la referencia a su premio. Esta acción no se puede deshacer.";
     }
 
     private static function stockDisponible(callable $get): int
     {
         return Premio::find($get('premio_id'))?->cantidad_disponible ?? 0;
     }
+
 
     public static function getRelations(): array
     {

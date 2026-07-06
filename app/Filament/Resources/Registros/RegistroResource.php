@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\Registros;
 
-use App\Filament\Resources\Registros\Pages\CreateRegistro;
 use App\Filament\Resources\Registros\Pages\EditRegistro;
 use App\Filament\Resources\Registros\Pages\ListRegistros;
 use App\Filament\Resources\Registros\Pages\ViewRegistro;
@@ -24,6 +23,10 @@ use Filament\Forms\Form;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Actions\Action;
+use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 
 class RegistroResource extends Resource
 {
@@ -46,7 +49,7 @@ class RegistroResource extends Resource
                 TextInput::make('telefono')->label('Teléfono de Contacto')->disabled(),
                 TextInput::make('lugar_compra')->label('Establecimiento de Compra')->disabled(),
                 TextInput::make('semana')->label('Semana de Participación')->disabled(),
-                
+
                 FileUpload::make('factura_imagen')
                     ->label('Evidencia de la Factura')
                     ->image()
@@ -57,7 +60,7 @@ class RegistroResource extends Resource
                     ->label('Estatus de Validación')
                     ->options([
                         'pendiente' => 'Pendiente por Revisar',
-                        'preseleccionado' => 'Preseleccionado — Validar Factura', 
+                        'preseleccionado' => 'Preseleccionado — Validar Factura',
                         'verificado' => 'Verificado / Válido',
                         'rechazado' => 'Rechazado / Fraude',
                     ])
@@ -66,7 +69,7 @@ class RegistroResource extends Resource
                     ->label('Asignar Premio Obtenido')
                     ->relationship('premio', 'nombre')
                     ->disabled()
-                    ->visible(fn (callable $get) => $get('ganador') === true),
+                    ->visible(fn(callable $get) => $get('ganador') === true),
             ]);
     }
 
@@ -82,21 +85,20 @@ class RegistroResource extends Resource
                 TextColumn::make('cedula')->label('Cédula')->searchable()->sortable(),
                 TextColumn::make('nombre')->label('Participante')->searchable(),
                 TextColumn::make('lugar_compra')->label('Comercio'),
-                
-                // 📸 Visualización directa de la factura cargada desde el teléfono
+
                 ImageColumn::make('factura_imagen')
                     ->label('Factura')
                     ->square()
                     ->disk('public'),
 
                 TextColumn::make('semana')->label('Sem.')->sortable(),
-                
+
                 TextColumn::make('estado')
                     ->label('Estatus')
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
+                    ->color(fn(string $state): string => match ($state) {
                         'pendiente'       => 'gray',
-                        'preseleccionado' => 'warning',   // ← NUEVO: amarillo/naranja
+                        'preseleccionado' => 'warning',
                         'verificado'      => 'success',
                         'rechazado'       => 'danger',
                     }),
@@ -104,22 +106,84 @@ class RegistroResource extends Resource
                 TextColumn::make('ganador')
                     ->label('¿Ganó?')
                     ->badge()
-                    ->color(fn ($state) => $state ? 'warning' : 'gray')
-                    ->formatStateUsing(fn ($state) => $state ? 'GANADOR' : 'No'),
+                    ->color(fn($state) => $state ? 'warning' : 'gray')
+                    ->formatStateUsing(fn($state) => $state ? 'GANADOR' : 'No'),
+            ])
+            ->recordActions([
+                Action::make('verFactura')
+                    ->label('Ver factura')
+                    ->icon('heroicon-o-photo')
+                    ->color('gray')
+                    ->modalHeading(fn(Registro $record) => "Factura de {$record->nombre}")
+                    ->modalContent(fn(Registro $record) => new HtmlString(
+                        '<img src="' . Storage::disk('public')->url($record->factura_imagen) . '" style="width:100%;border-radius:12px;">'
+                    ))
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Cerrar'),
+
+                Action::make('verificar')
+                    ->label('Verificar')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(fn(Registro $record) => $record->estado === 'preseleccionado')
+                    ->requiresConfirmation()
+                    ->modalHeading('Verificar factura')
+                    ->modalDescription(
+                        fn(Registro $record) =>
+                        "Confirma que la factura de {$record->nombre} es válida. Se le entregará: {$record->premio?->nombre}."
+                    )
+                    ->modalContent(fn(Registro $record) => new HtmlString(
+                        '<img src="' . Storage::disk('public')->url($record->factura_imagen) . '" style="width:100%;border-radius:12px;">'
+                    ))
+                    ->action(function (Registro $record) {
+                        $record->update(['estado' => 'verificado']);
+
+                        activity('registros')
+                            ->causedBy(auth()->user())
+                            ->performedOn($record)
+                            ->log("Admin " . auth()->user()->name . " verificó la factura de {$record->nombre}, premio {$record->premio?->nombre} confirmado");
+
+                        Notification::make()
+                            ->title('Registro verificado')
+                            ->body("{$record->nombre} — premio confirmado.")
+                            ->success()
+                            ->send();
+                    }),
+
+                Action::make('rechazar')
+                ->label('Rechazar')
+                ->icon('heroicon-o-x-circle')
+                ->color('danger')
+                ->visible(fn (Registro $record) => in_array($record->estado, ['preseleccionado', 'verificado']))
+                ->requiresConfirmation()
+                ->modalHeading('Rechazar factura')
+                ->modalDescription(fn (Registro $record) => $record->estado === 'verificado'
+                    ? "⚠️ Este premio YA fue entregado a {$record->nombre}. Al rechazar, se revocará y el inventario se ajustará. Esta acción no se puede deshacer."
+                    : "¿Confirmas que la factura de {$record->nombre} es inválida o fraudulenta? El premio será revocado.")
+                ->modalContent(fn (Registro $record) => new HtmlString(
+                    '<img src="' . Storage::disk('public')->url($record->factura_imagen) . '" style="width:100%;border-radius:12px;">'
+                ))
+                ->action(function (Registro $record) {
+                    $record->update(['estado' => 'rechazado']);
+
+                    Notification::make()
+                        ->title('Registro rechazado')
+                        ->body("{$record->nombre} — premio revocado.")
+                        ->danger()
+                        ->send();
+                }),
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
                 SelectFilter::make('estado')->options([
-                    'pendiente' => 'Pendiente',
+                    'pendiente'       => 'Pendiente',
                     'preseleccionado' => 'Preseleccionado',
-                    'verificado' => 'Verificado',
-                    'rechazado' => 'Rechazado',
+                    'verificado'      => 'Verificado',
+                    'rechazado'       => 'Rechazado',
                 ]),
-                SelectFilter::make('semana')->label('Filtrar por Semana')->options([
-                    1 => 'Semana 1',
-                    2 => 'Semana 2',
-                    3 => 'Semana 3',
-                ]),
+                SelectFilter::make('semana')
+                    ->label('Filtrar por Semana')
+                    ->options(collect(range(1, 12))->mapWithKeys(fn($s) => [$s => "Semana {$s}"])->all()),
             ]);
     }
 
@@ -134,7 +198,6 @@ class RegistroResource extends Resource
     {
         return [
             'index' => ListRegistros::route('/'),
-            'create' => CreateRegistro::route('/create'),
             'view' => ViewRegistro::route('/{record}'),
             'edit' => EditRegistro::route('/{record}/edit'),
         ];

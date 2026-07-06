@@ -52,6 +52,7 @@ class ActivityResource extends Resource
                         'premios', 'productos' => 'success',
                         'registros' => 'info',
                         'distribuidores' => 'danger',
+                        'liberaciones_semanales' => 'purple',
                         default => 'primary',
                     })
                     ->searchable(),
@@ -106,6 +107,7 @@ class ActivityResource extends Resource
                         'premios' => 'Premios / Productos',
                         'registros' => 'Registros / Facturas',
                         'distribuidores' => 'Distribuidores',
+                        'liberaciones_semanales' => 'Lotes Semanales',
                     ]),
             ]);
     }

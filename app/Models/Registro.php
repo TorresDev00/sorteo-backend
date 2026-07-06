@@ -5,9 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class Registro extends Model
 {
+    use LogsActivity;
     protected $fillable = [
         'sorteo_id',
         'cedula',
@@ -29,6 +32,27 @@ class Registro extends Model
         'semana'         => 'integer',
         'fecha_registro' => 'datetime',
     ];
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['cedula', 'nombre', 'telefono', 'estado', 'semana', 'ganador', 'premio_id'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->useLogName('registros');
+    }
+
+    public function getDescriptionForEvent(string $eventName): string
+    {
+        return match ($eventName) {
+            'created' => "Nuevo registro de {$this->nombre} (Cédula: {$this->cedula}) — estado: {$this->estado}",
+            'updated' => $this->wasChanged('estado')
+                ? "Registro de {$this->nombre} cambió estado a '{$this->estado}'"
+                : "Registro de {$this->nombre} actualizado",
+            'deleted' => "Registro de {$this->nombre} eliminado (estaba en estado: {$this->estado})",
+            default   => $eventName,
+        };
+    }
 
     public function sorteo(): BelongsTo
     {

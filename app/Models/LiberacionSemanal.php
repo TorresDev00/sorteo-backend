@@ -6,9 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class LiberacionSemanal extends Model
 {
+    use LogsActivity;
     protected $table = 'liberaciones_semanales';
 
     protected $fillable = [
@@ -17,6 +20,26 @@ class LiberacionSemanal extends Model
         'fecha_liberacion',
         'notas',
     ];
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logFillable()
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->useLogName('liberaciones_semanales');
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::deleting(function (LiberacionSemanal $liberacionSemanal) {
+            $liberacionSemanal->liberacionPremios()->each(function ($lp) {
+                $lp->delete(); 
+            });
+        });
+    }
 
     public function sorteo(): BelongsTo
     {
