@@ -1,4 +1,7 @@
 {
   "$schema": "https://schema.railpack.com",
-  "phpExts": ["intl", "zip"]
+  "phpExts": ["intl", "zip", "gd"],
+  "deploy": {
+    "startCommand": "php artisan config:clear && php artisan migrate --force && php artisan storage:link && chmod -R ugo+w storage/app/public && php artisan serve --host=0.0.0.0 --port=$PORT"
+  }
 }
