@@ -5,6 +5,7 @@ namespace App\Providers;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Failed;
 use App\Listeners\LoginLogListener;
@@ -28,6 +29,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if ($this->app->environment('production')) {
+            URL::forceScheme('https');
+        }
+
         Schema::defaultStringLength(191);
         Event::listen(Login::class, [LoginLogListener::class, 'handle']);
         Event::listen(Failed::class, [LoginLogListener::class, 'handle']);
